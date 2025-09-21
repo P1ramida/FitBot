@@ -8,8 +8,8 @@ class Base(DeclarativeBase):
 
 
 class GoalEnum(enum.Enum):
-    LOSS = "loss"
-    UP = "UP"
+    lose_weight = "lose weight"
+    gain_weight = "gain weight"
 
 class GenderEnum(enum.Enum):
     Man = 'Man'
@@ -55,6 +55,7 @@ class Tasks(Base):
         Enum(TaskTypeEnum, name='task_type_enum', create_constraint=True),
         nullable=False
     )
+    description: Mapped[str] = mapped_column(nullable=False)
     points: Mapped[int] = mapped_column(nullable=False)
     is_required: Mapped[bool] = mapped_column(nullable=False, default=True)
     is_active: Mapped[bool] = mapped_column(nullable=False, default=True)
@@ -68,8 +69,7 @@ class UserTask(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id"), nullable=False)
     date: Mapped[Date] = mapped_column(Date, nullable=False)
-    completed: Mapped[bool] = mapped_column(default=False)
-
+    
     user: Mapped["Users"] = relationship(back_populates="tasks")
     task: Mapped["Tasks"] = relationship(back_populates="user_tasks")
 

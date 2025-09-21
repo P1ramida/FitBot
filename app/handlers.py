@@ -10,7 +10,13 @@ from aiogram.types import Message, CallbackQuery
 import app.keyboards as kb
 
 from .ai import photo_recognition
-from .database.core import get_or_check_user, add_user, get_leaders
+from .database.core import (
+    get_or_check_user,
+    add_user,
+    get_leaders,
+    insert_completed_task,
+    check_completed_task
+)
 from .texts import (
     WELCOME_TEXT,
     MAIN_MENU_TEXT,
@@ -42,7 +48,6 @@ class TaskStates(StatesGroup):
 
 @router.message(CommandStart())
 async def start(message: Message):
-
     await message.answer(
         WELCOME_TEXT.format(full_name=message.from_user.full_name),
         reply_markup=kb.start_button,
@@ -50,9 +55,10 @@ async def start(message: Message):
 
 
 @router.callback_query(F.data == "check_registration")
-async def check_registration(callback: CallbackQuery, bot: Bot):
-    register_result = await get_or_check_user(callback.from_user.id, flag="check")
-    if register_result == True:
+async def check_registration(callback: CallbackQuery, state: FSMContext):
+    user_result = await get_or_check_user(telegram_id=callback.from_user.id)
+    if user_result.get("flag") == True:
+        await state.update_data(user=user_result.get("user"))
         await callback.message.edit_text(
             MAIN_MENU_TEXT.format(full_name=callback.from_user.full_name),
             reply_markup=kb.main_menu_buttons,
@@ -76,7 +82,7 @@ async def start_registration(callback: CallbackQuery, state: FSMContext):
 async def get_weight(message: Message, state: FSMContext):
     try:
         weight = float(message.text)
-        if weight <= 0:
+        if weight <= 0 or weight > 150:
             await message.answer("Пожалуйста введи вес корректно 😉")
             return
         await state.update_data(weight=message.text)
@@ -91,8 +97,8 @@ async def get_weight(message: Message, state: FSMContext):
 async def get_height(message: Message, state: FSMContext):
     try:
         height = int(message.text)
-        if height <= 0 or height > 140:
-            await message.answer("Пожалуйста введите рост корректно 😉")
+        if height <= 0 or height > 300:
+            await message.answer("Пожалуйста введите рост корректно (см.) 😉")
             return
         await state.update_data(height=message.text)
         await state.set_state(Register.age)
@@ -140,7 +146,9 @@ async def get_goal(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(
         COMPLETE_REGISTRATION, reply_markup=kb.main_menu_buttons
     )
+    new_user_result = await get_or_check_user(telegram_id=callback.from_user.id)
     await state.clear()
+    await state.update_data(user=new_user_result.get("user"))
 
 
 @router.callback_query(F.data == "back_to_main_menu")
@@ -176,9 +184,33 @@ async def user_quest(callback: CallbackQuery, state: FSMContext):
 async def processing_tasks(callback: CallbackQuery, state: FSMContext):
     tasks = callback.bot.tasks
     task_id = int(callback.data.removeprefix("task_"))
-    await state.update_data(task_id=task_id)
-
     task = tasks[task_id]
+
+
+    test_data = await state.get_data()
+    if test_data.get("user") == None:
+        user_result = await get_or_check_user(telegram_id=callback.from_user.id)
+        await state.update_data(user=user_result.get("user"))
+
+    user = (await state.get_data()).get("user")
+
+    check_task_status = await check_completed_task(task_id=task_id, user_id=user.get("id"))
+    if check_task_status == True:
+        await callback.message.answer("""
+🔔 Ты уже выполнил(а) эту задачу сегодня!
+Отличная работа! 💪 Не забывай возвращаться завтра — ежедневный прогресс приносит большие результаты! 🚀😉
+""", reply_markup=kb.main_menu_buttons)
+        await state.clear()
+        return
+
+
+    await state.update_data(
+        task_id=task_id,
+        task_name=task.get("name"),
+        task_description=task.get("description"),
+        task_points=task.get("points"),
+    )
+
     bot_answer = task.get("bot_answer")
     if task.get("type") == "text":
         await state.set_state(TaskStates.waiting_for_text)
@@ -188,18 +220,42 @@ async def processing_tasks(callback: CallbackQuery, state: FSMContext):
 
 
 @router.message(TaskStates.waiting_for_photo)
-async def task_text_answer(message: Message, bot: Bot, state: FSMContext):
+async def photo_task(message: Message, bot: Bot, state: FSMContext):
     if not message.photo:
         await message.answer("Пожалуйста, пришлите фото 😊")
         return
+
     await message.answer("Обработка фото началась...⏳")
+
     file_id = message.photo[-1].file_id
     file = await bot.get_file(file_id)
     file_url = f"https://api.telegram.org/file/bot{bot.token}/{file.file_path}"
 
-    result = await photo_recognition(file_url)
+    data = await state.get_data()
+
+    user = data.get("user")
+    task_description = data.get("task_description")
+    task_name = data.get("task_name")
+    task_id = data.get("task_id")
+    task_points = data.get("task_points")
+    user_id = user.get("id")
+
+    result = await photo_recognition(
+        file_url=file_url,
+        task_name=task_name,
+        task_description=task_description,
+        goal=user.get("goal"),
+    )
+    
     if result == "False":
-        await message.answer("Пожалуйста, пришлите фото еды 😊")
+        await message.answer("Фото не соответствует заданию, попробуйте ещё раз 😊")
         return
-    await message.answer(result, reply_markup=kb.main_menu_buttons)
+
+    await insert_completed_task(u_id=user_id, t_id=task_id, adding_points=task_points)
+    await message.answer(result, reply_markup=kb.main_menu_buttons, parse_mode="Markdown")
     await state.clear()
+    return
+
+@router.message(TaskStates.waiting_for_text)
+async def text_task(message: Message, bot: Bot, state: FSMContext):
+    pass

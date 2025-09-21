@@ -47,7 +47,6 @@ main_menu_buttons = InlineKeyboardMarkup(
         [InlineKeyboardButton(text="🏆 Достижения", callback_data="user_achive")],
         [InlineKeyboardButton(text="📊 Рейтинг", callback_data="user_raiting")],
         [InlineKeyboardButton(text="📒 Инструкции", callback_data="user_instruction")],
-        [InlineKeyboardButton(text="📝 Дневник", callback_data="user_daily")],
     ]
 )
 

@@ -1,7 +1,6 @@
-import asyncio
-from sqlalchemy import text, insert, select, desc
-from sqlalchemy.ext.asyncio import AsyncSession
-from .models import Base, GoalEnum, GenderEnum, Users, Tasks
+from sqlalchemy import select, update, desc
+from datetime import date
+from .models import Base, GoalEnum, GenderEnum, Users, Tasks, UserTask
 from .init_engine import async_engine, async_session
 
 
@@ -19,24 +18,25 @@ async def add_user(data: dict) -> None:
         weight=float(data["weight"]),
         age=int(data["age"]),
         gender=GenderEnum.Man if int(data["gender"]) == 1 else GenderEnum.Woman,
-        goal=GoalEnum.UP if int(data["goal"]) == 0 else GoalEnum.LOSS,
+        goal=GoalEnum.lose_weight if int(data["goal"]) == 1 else GoalEnum.gain_weight,
     )
     async with async_session() as session:
         session.add(new_user)
         await session.commit()
 
 
-async def get_or_check_user(telegram_id: str, * , flag: str) -> bool:
+async def get_or_check_user(*, telegram_id: str) -> dict[bool, Users]:
     async with async_session() as session:
         stmt = select(Users).where(Users.telegram_id == telegram_id)
         result = await session.execute(stmt)
         user = result.scalar_one_or_none()
-        if flag == 'check':
-            if user is not None:
-                return True
-            return False
-        if flag == 'get_info':
-            return user
+        if user is not None:
+            returing_user = {
+                "id":user.id,
+                "goal":user.goal.value
+            }
+            return {"flag": True, "user": returing_user}
+        return {"flag": False, "user": None}
 
 
 async def get_leaders() -> list[dict]:
@@ -59,7 +59,7 @@ async def get_leaders() -> list[dict]:
 
 async def get_tasks() -> list[dict]:
     async with async_session() as session:
-        stmt = select(Tasks).where(Tasks.is_active == True)
+        stmt = select(Tasks).where(Tasks.is_active == True).order_by(Tasks.id)
         result = await session.execute(stmt)
         data = result.scalars().all()
         tasks = []
@@ -77,3 +77,40 @@ async def get_tasks() -> list[dict]:
 
         return tasks
 
+async def add_points(*, user_id: int, adding_points: int):
+    async with async_session() as session:
+        stmt = (
+            update(Users).where(Users.id == user_id).
+            values(points = Users.points + adding_points)
+        )
+        await session.execute(stmt)
+        await session.commit()
+
+
+async def insert_completed_task(*, u_id, t_id, adding_points):
+    new_user_task = UserTask(
+        user_id=int(u_id),
+        task_id=int(t_id),
+        date=date.today(),
+    )
+
+    async with async_session() as session:
+        session.add(new_user_task)
+        await session.commit()
+
+    await add_points(user_id=u_id, adding_points=adding_points)
+
+async def check_completed_task(*, task_id: int, user_id: int) -> bool:
+    stmt = select(UserTask).where(
+    (UserTask.user_id == user_id) &
+    (UserTask.task_id == task_id) &
+    (UserTask.date == date.today())
+    )
+
+    async with async_session() as session:
+        result = await session.execute(stmt)
+        task_comleted = result.scalar_one_or_none()
+        
+        if task_comleted:
+            return True
+        return False

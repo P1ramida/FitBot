@@ -1,5 +1,6 @@
 ./venv
 venv
 __pycache__
-credentials.json
 .env
+venv
+.venv/
